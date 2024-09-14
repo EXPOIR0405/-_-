@@ -4,18 +4,21 @@ import 'package:intl/intl.dart'; // 날짜 포맷
 import 'package:intl/date_symbol_data_local.dart'; // 추가
 import 'ending_screen.dart'; // 엔딩 화면으로 이동하기 위한 import
 
-
 class GameScreen extends StatefulWidget {
   @override
   _GameScreenState createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> {
+class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateMixin {
   Player player = Player(); // 플레이어 정보
   int touchCount = 0;
   int requiredTouches = 80;
-  double pencilPosition = 0.0; // 연필의 위치를 조정하기 위한 변수
   double opacity = 0.0; // 이미지 서서히 나타나게 하기 위한 변수
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  String currentImage = 'assets/webtoon_drawing1.png'; // 현재 그리는 이미지
+  DateTime currentDate = DateTime(DateTime.now().year, 1, 1); // 1월 1일부터 시작
+  int weeksPassed = 0;
 
   List<String> imagePaths = [
     'assets/webtoon_drawing1.png', // 그림 파일 경로
@@ -39,17 +42,54 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       if (touchCount < requiredTouches) {
         touchCount++;
-        pencilPosition += 10.0; // 연필의 위치를 변화시켜 움직이는 효과
-        opacity += 1.0 / imagePaths.length; // 클릭할 때마다 이미지가 서서히 나타남
-        player.drawFrame(); // 수익 및 인기도 갱신
+        _controller.forward(from: 0.0);
       }
+      if (touchCount == requiredTouches) {
+        // 한 화가 완성되면 수익 계산 및 상태 업데이트
+        player.calculateIncome();
+        player.popularity += 1;
+        player.illegalLossRate += 0.03;
+        currentImage = imagePaths[imagePaths.indexOf(currentImage) + 1 % imagePaths.length];
+        touchCount = 0;
+        weeksPassed++;
+        currentDate = currentDate.add(Duration(days: 7));
+      }
+    });
+  }
+
+  void _resetGame() {
+    setState(() {
+      player = Player();
+      touchCount = 0;
+      weeksPassed = 0;
+      currentDate = DateTime(DateTime.now().year, 1, 1);
+      currentImage = imagePaths[0];
     });
   }
 
   @override
   void initState() {
     super.initState();
-    initializeDateFormatting('ko_KR', null); // 추가
+    initializeDateFormatting('ko_KR', null);
+    player.income = 800000; // 기본 수입 설정
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _animation = Tween<double>(begin: -0.2, end: 0.2).animate(_controller) // 회전 각도 변경
+      ..addListener(() {
+        setState(() {});
+      });
+  }
+
+  String getCurrentDate() {
+    return DateFormat('yyyy년 MM월 dd일', 'ko_KR').format(currentDate);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   String getCurrentMonth() {
@@ -62,34 +102,51 @@ class _GameScreenState extends State<GameScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('웹툰작가로 살아남기'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: _resetGame,
+            tooltip: '게임 초기화',
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // 현재 달 표시
-          Text('현재 달: ${getCurrentMonth()}', style: TextStyle(fontSize: 20)),
+          Text('현재 날짜: ${getCurrentDate()}', style: TextStyle(fontSize: 20)),
+          Text('지난 주: $weeksPassed', style: TextStyle(fontSize: 20)),
           SizedBox(height: 10),
 
-          // 연필 클릭 애니메이션
           GestureDetector(
             onTap: _onPencilTap,
-            child: AnimatedContainer(
-              duration: Duration(milliseconds: 500),
-              transform: Matrix4.translationValues(pencilPosition, 0, 0),
-              child: Image.asset(
-                'assets/pencil.png', // 연필 이미지
+            child: Transform.rotate(
+              angle: _animation.value,
+              child: Container(
                 width: 100,
                 height: 100,
+                child: Image.asset('assets/pencil.png'),
               ),
             ),
           ),
           SizedBox(height: 20),
 
-          // 도화지 위에 이미지가 서서히 나타나는 부분
+          Text('남은 터치 횟수: ${requiredTouches - touchCount}', 
+               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text('연필을 클릭해주세요', style: TextStyle(fontSize: 16)),
+          SizedBox(height: 10),
+
+          // 도화지 위에 이미지가 아래에서부터 나타나는 부분
           Expanded(
             child: Center(
-              child: Opacity(
-                opacity: opacity,
-                child: Image.asset(imagePaths[touchCount % imagePaths.length]),
+              child: ClipRect(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  heightFactor: touchCount / requiredTouches,
+                  child: Image.asset(
+                    currentImage,
+                    width: MediaQuery.of(context).size.width * 0.5, // 화면 너비의 50%로 설정
+                    fit: BoxFit.contain,
+                  ),
+                ),
               ),
             ),
           ),
@@ -99,13 +156,14 @@ class _GameScreenState extends State<GameScreen> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
+                Text('인기도: ${player.popularity}', style: TextStyle(fontSize: 20)),
                 Text('이번화 수익: ${player.income} 원', style: TextStyle(fontSize: 20)),
                 Text('불법 웹툰으로 인한 수익 감소율: ${(player.illegalLossRate * 100).toStringAsFixed(2)} %', style: TextStyle(fontSize: 20)),
                 Text('총 수입: ${player.totalIncome} 원', style: TextStyle(fontSize: 20)),
               ],
             ),
           ),
-// 게임 종료하기 버튼
+          // 게임 종료하기 버튼
           ElevatedButton(
             onPressed: () {
               // 게임 종료 후 엔딩 화면으로 이동
@@ -116,9 +174,10 @@ class _GameScreenState extends State<GameScreen> {
             },
             child: Text('게임 종료하기'),
           ),
-
         ],
       ),
     );
   }
 }
+
+// PencilPainter 클래스는 더 이상 필요하지 않으므로 삭제할 수 있습니다.

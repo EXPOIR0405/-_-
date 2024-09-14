@@ -20,4 +20,10 @@ class Player {
       return '전설의 작가';
     }
   }
+
+  void calculateIncome() {
+    double baseIncome = 800000 * (1 + popularity * 0.1); // 인기도에 따라 수익 증가
+    income = (baseIncome * (1 - illegalLossRate)).round();
+    totalIncome += income;
+  }
 }
